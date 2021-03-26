@@ -14,7 +14,7 @@ import traceback
 from uuid import UUID
 import urllib
 
-import pypkjs.PyV8 as v8
+import STPyV8 as v8
 from libpebble2.protocol.appglance import AppGlance, AppGlanceSlice, AppGlanceSliceType
 from libpebble2.protocol.appmessage import AppMessage
 from libpebble2.protocol.blobdb import BlobDatabaseID, BlobStatus
@@ -38,16 +38,6 @@ class TokenException(Exception):
 
 class Pebble(events.EventSourceMixin, v8.JSClass):
     def __init__(self, runtime, pebble):
-        self.extension = v8.JSExtension(runtime.ext_name("pebble"), """
-        Pebble = new (function() {
-            native function _internal_pebble();
-            _make_proxies(this, _internal_pebble(),
-                ['sendAppMessage', 'showSimpleNotificationOnPebble', 'getAccountToken', 'getWatchToken',
-                'addEventListener', 'removeEventListener', 'openURL', 'getTimelineToken', 'timelineSubscribe',
-                'timelineUnsubscribe', 'timelineSubscriptions', 'getActiveWatchInfo', 'appGlanceReload']);
-            this.platform = 'pypkjs';
-        })();
-        """, lambda f: lambda: self, dependencies=["runtime/internal/proxy"])
         self.blobdb = pebble.blobdb
         self.pebble = pebble.pebble
         self.runtime = runtime
@@ -60,6 +50,19 @@ class Pebble(events.EventSourceMixin, v8.JSClass):
         self._appmessage = self.runtime.runner.appmessage
         self._appmessage_handlers = []
         super(Pebble, self).__init__(runtime)
+
+    def setup(self):
+        self.runtime.context.eval("""
+        (function(_internal_pebble) {
+            this.Pebble = new (function() {
+                _make_proxies(this, _internal_pebble,
+                    ['sendAppMessage', 'showSimpleNotificationOnPebble', 'getAccountToken', 'getWatchToken',
+                    'addEventListener', 'removeEventListener', 'openURL', 'getTimelineToken', 'timelineSubscribe',
+                    'timelineUnsubscribe', 'timelineSubscriptions', 'getActiveWatchInfo', 'appGlanceReload']);
+            })();
+            this.Pebble.platform = 'pypkjs';
+        });
+        """)(self)
 
     def _connect(self):
         self._ready()
@@ -108,10 +111,10 @@ class Pebble(events.EventSourceMixin, v8.JSClass):
 
         app_keys = dict(zip(self.app_keys.values(), self.app_keys.keys()))
         d = self.runtime.context.eval("({})")  # This is kinda absurd.
-        for k, v in dictionary.iteritems():
+        for k, v in dictionary.items():
             if isinstance(v, int):
                 value = v
-            elif isinstance(v, basestring):
+            elif isinstance(v, str):
                 value = v
             elif isinstance(v, bytearray):
                 value = v8.JSArray(list(v))
@@ -132,7 +135,7 @@ class Pebble(events.EventSourceMixin, v8.JSClass):
         self._check_ready()
         to_send = {}
         message = {k: message[str(k)] for k in message.keys()}
-        for k, v in message.iteritems():
+        for k, v in message.items():
             if k in self.app_keys:
                 k = self.app_keys[k]
             try:
@@ -142,12 +145,10 @@ class Pebble(events.EventSourceMixin, v8.JSClass):
 
         d = {}
         appmessage = AppMessage()
-        for k, v in to_send.iteritems():
+        for k, v in to_send.items():
             if isinstance(v, v8.JSArray):
                 v = list(v)
-            if isinstance(v, basestring):
-                if not isinstance(v, unicode):
-                    v = v.decode('utf-8')
+            if isinstance(v, str):
                 v = CString(v)
             elif isinstance(v, int):
                 v = Int32(v)
@@ -166,8 +167,8 @@ class Pebble(events.EventSourceMixin, v8.JSClass):
                             b.append(byte)
                         else:
                             raise JSRuntimeException("Bytes must be between 0 and 255 inclusive.")
-                    elif isinstance(byte, str):  # This is intentionally not basestring; unicode won't work.
-                        b.extend(bytearray(byte))
+                    elif isinstance(byte, str):
+                        b.extend(bytearray(byte, 'utf-8'))
                     else:
                         raise JSRuntimeException("Unexpected value in byte array.")
                 v = ByteArray(bytes(b))
@@ -181,8 +182,14 @@ class Pebble(events.EventSourceMixin, v8.JSClass):
         self.pending_acks[tid] = (success, failure)
 
     def showSimpleNotificationOnPebble(self, title, message):
+        print("showSimpleNotiication", title, message)
         self._check_ready()
-        Notifications(self.pebble, self.blobdb).send_notification(title, message)
+        try:
+            Notifications(self.pebble, self.blobdb).send_notification(title, message)
+        except Exception:
+            traceback.print_exc()
+            raise
+        print("shown")
 
     def showNotificationOnPebble(self, opts):
         pass
@@ -352,7 +359,7 @@ class Pebble(events.EventSourceMixin, v8.JSClass):
     def _time_from_js(self, js_time):
         if js_time is None:
             return 0
-        elif isinstance(js_time, basestring):
+        elif isinstance(js_time, str):
             dt = dateutil.parser.parse(js_time)
             if dt.tzinfo is None:
                 raise JSRuntimeException("Date strings without timezone information are not permitted.")

@@ -9,6 +9,7 @@ from .pebble import Pebble
 from .xhr import prepare_xhr
 from .navigator import Navigator
 from .ws import prepare_ws
+from .events import setup as prepare_events
 
 
 class PebbleKitJS(object):
@@ -26,12 +27,10 @@ class PebbleKitJS(object):
             self.pebble,
         ]
 
-    def get_extension_names(self):
-        return [x.extension.name for x in self.extensions] + ["runtime/events/progress", "runtime/xhr", "runtime/ws",
-                                                              "runtime/geolocation/position",
-                                                              "runtime/geolocation/coordinates"]
-
     def do_post_setup(self):
+        prepare_events(self.runtime)
+        for extension in self.extensions:
+            extension.setup()
         prepare_xhr(self.runtime)
         prepare_ws(self.runtime)
 

@@ -1,12 +1,12 @@
 from __future__ import absolute_import
 __author__ = 'katharine'
 
-import pypkjs.PyV8 as v8
+import STPyV8 as v8
 import errno
 import logging
 import os
 import os.path
-import dumbdbm  # This is the only one that actually syncs data if the process dies before I can close().
+import dbm.dumb  # This is the only one that actually syncs data if the process dies before I can close().
 logger = logging.getLogger("pypkjs.javascript.localstorage")
 
 _storage_cache = {}  # This is used when filesystem-based storage is unavailable.
@@ -14,6 +14,7 @@ _storage_cache = {}  # This is used when filesystem-based storage is unavailable
 
 class LocalStorage(object):
     def __init__(self, runtime, persist_dir=None):
+        self.runtime = runtime
         self.storage = None
         if persist_dir is not None:
             try:
@@ -23,24 +24,22 @@ class LocalStorage(object):
                     if e.errno != errno.EEXIST:
                         raise
 
-                self.storage = dumbdbm.open(os.path.join(persist_dir, 'localstorage', str(runtime.pbw.uuid)), 'c')
+                self.storage = dbm.dumb.open(os.path.join(persist_dir, 'localstorage', str(runtime.pbw.uuid)), 'c')
             except IOError:
                 pass
         if self.storage is None:
             logger.warning("Using transient store.")
             self.storage = _storage_cache.setdefault(str(runtime.pbw.uuid), {})
 
-        self.extension = v8.JSExtension(runtime.ext_name("localstorage"), """
-        (function() {
-            native function _internal();
+    def setup(self):
+        self.runtime.context.eval("""
+            (function(_internal) {
+                var proxy = _make_proxies({}, _internal, ['set', 'has', 'delete_', 'keys', 'enumerate']);
+                var methods = _make_proxies({}, _internal, ['clear', 'getItem', 'setItem', 'removeItem', 'key']);
+                proxy.get = function get(p, name) { return methods[name] || _internal.get(p, name); }
 
-            var proxy = _make_proxies({}, _internal(), ['set', 'has', 'delete_', 'keys', 'enumerate']);
-            var methods = _make_proxies({}, _internal(), ['clear', 'getItem', 'setItem', 'removeItem', 'key']);
-            proxy.get = function get(p, name) { return methods[name] || _internal().get(p, name); }
-
-            this.localStorage = Proxy.create(proxy);
-        })();
-        """, lambda f: lambda: self, dependencies=["runtime/internal/proxy"])
+                this.localStorage = new Proxy({}, proxy);
+            })""")(self)
 
     def get(self, p, name):
         return self.storage.get(str(name), v8.JSNull())

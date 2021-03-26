@@ -2,15 +2,15 @@ from __future__ import absolute_import
 __author__ = 'katharine'
 
 from gevent import monkey; monkey.patch_all()
-from gevent.greenlet import GreenletExit
+from gevent import GreenletExit
 import struct
 import websocket
 
-import pypkjs.PyV8 as v8
+import STPyV8 as v8
 from .exceptions import JSRuntimeException
 from . import events
 
-close_event = v8.JSExtension("runtime/events/ws", """
+close_event_js = """
 CloseEvent = function(eventInitDict) {
     Event.call(this, "close", eventInitDict);
     var wasClean = eventInitDict.wasClean;
@@ -40,26 +40,10 @@ MessageEvent = function(origin, data, eventInitDict) {
 };
 MessageEvent.prototype = Object.create(Event.prototype);
 MessageEvent.prototype.constructor = CloseEvent;
-""", dependencies=["runtime/event"])
+"""
 
 CloseEvent = lambda runtime, *args: v8.JSObject.create(runtime.context.locals.CloseEvent, args)
 MessageEvent = lambda runtime, *args: v8.JSObject.create(runtime.context.locals.MessageEvent, args)
-
-ws = v8.JSExtension("runtime/ws", """
-_init_websocket = function(runtime, session) {
-    native function _ws();
-    this.WebSocket = function(url, protocols) {
-        var origin = new _ws(runtime, url, protocols);
-        _make_proxies(this, origin, ['close', 'send']);
-        _make_properties(this, origin, ['readyState', 'bufferedAmount', 'onopen', 'onerror', 'onclose', 'onmessage',
-                                        'extensions', 'protocol', 'binaryType']);
-    };
-    this.WebSocket.CONNECTING = 0;
-    this.WebSocket.OPEN = 1;
-    this.WebSocket.CLOSING = 2;
-    this.WebSocket.CLOSED = 3;
-}
-""", lambda f: WebSocket, dependencies=[close_event.name])
 
 
 class WebSocket(events.EventSourceMixin):
@@ -78,7 +62,7 @@ class WebSocket(events.EventSourceMixin):
         else:
             self.protocols = protocols
         self.runtime.group.spawn(self.handle_ws)
-        self.ws = None
+        self.ws: websocket.WebSocket = None
 
         # JS properties
         self.readyState = self.CONNECTING
@@ -100,7 +84,7 @@ class WebSocket(events.EventSourceMixin):
     def send(self, data, *args):
         if self.readyState != self.OPEN:
             raise JSRuntimeException("Websocket is not open.")
-        if isinstance(data, basestring):
+        if isinstance(data, str):
             self.ws.send(data)
             return
         # yay, JavaScript
@@ -110,7 +94,7 @@ class WebSocket(events.EventSourceMixin):
         if str(data) == '[object ArrayBuffer]':
             uint8_array = self.runtime.context.locals.Uint8Array
             data_array = uint8_array.create(uint8_array, (data,))
-            self.ws.send_binary(str(bytearray(data_array[str(x)] for x in xrange(data_array.length))))
+            self.ws.send_binary(bytes(bytearray(data_array[str(x)] for x in range(data_array.length))))
 
     def handle_ws(self):
         try:
@@ -175,4 +159,18 @@ class WebSocket(events.EventSourceMixin):
 
 
 def prepare_ws(runtime):
-    return runtime.context.locals._init_websocket(runtime)
+    runtime.context.eval(close_event_js)
+    runtime.context.eval("""
+        (function(_ws, runtime) {
+            this.WebSocket = function(url, protocols) {
+                var origin = new _ws(runtime, url, protocols);
+                _make_proxies(this, origin, ['close', 'send']);
+                _make_properties(this, origin, ['readyState', 'bufferedAmount', 'onopen', 'onerror', 'onclose', 'onmessage',
+                                                'extensions', 'protocol', 'binaryType']);
+            };
+            this.WebSocket.CONNECTING = 0;
+            this.WebSocket.OPEN = 1;
+            this.WebSocket.CLOSING = 2;
+            this.WebSocket.CLOSED = 3;
+        })
+        """)(WebSocket, runtime)

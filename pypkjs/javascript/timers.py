@@ -2,19 +2,19 @@ from __future__ import absolute_import
 __author__ = 'katharine'
 
 import gevent
-import pypkjs.PyV8 as v8
+
 
 class Timers(object):
     def __init__(self, runtime):
         self.runtime = runtime
         self.timers = {}
         self.counter = 1
-        self.extension = v8.JSExtension(self.runtime.ext_name('timers'), """
-        (function() {
-            native function _timers();
-            _make_proxies(this, _timers(), ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval']);
-        })();
-        """, lambda f: lambda: self, dependencies=["runtime/internal/proxy"])
+
+    def setup(self):
+        self.runtime.context.eval("""
+            (function(_timers) {
+                _make_proxies(this, _timers, ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval']);
+            })""")(self)
 
     def _exec_timer(self, timer_key, timeout_s, repeat, fn):
         while True:

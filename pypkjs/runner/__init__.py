@@ -13,7 +13,7 @@ import logging
 import os
 import os.path
 import shutil
-import urlparse
+import urllib.parse
 import urllib
 
 from libpebble2.util.bundle import PebbleBundle
@@ -147,14 +147,14 @@ class Runner(object):
 
     @staticmethod
     def url_append_params(url, params):
-        parsed = urlparse.urlparse(url, "http")
+        parsed = urllib.parse.urlparse(url, "http")
         query = parsed.query
         if parsed.query != '':
             query += '&'
 
-        encoded_params = urllib.urlencode(params)
+        encoded_params = urllib.parse.urlencode(params)
         query += encoded_params
-        return urlparse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, parsed.fragment))
+        return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, query, parsed.fragment))
 
     @property
     def _pbw_cache_dir(self):

@@ -1,30 +1,31 @@
 from __future__ import absolute_import
 __author__ = 'katharine'
 
-import pypkjs.PyV8 as v8
+import STPyV8 as v8
 import time
 import requests
 import pygeoip
 import os.path
 
-position = v8.JSExtension("runtime/geolocation/position", """
-    Position = (function(coords, timestamp) {
-        this.coords = coords;
-        this.timestamp = timestamp;
-    });
-""")
+position_js = """
+Position = (function(coords, timestamp) {
+    this.coords = coords;
+    this.timestamp = timestamp;
+});
+
+Coordinates = (function(long, lat, accuracy) {
+    this.longitude = long
+    this.latitude = lat
+    this.accuracy = accuracy
+});
+"""
 
 Position = lambda runtime, *args: v8.JSObject.create(runtime.context.locals.Position, args)
-
-coordinates = v8.JSExtension("runtime/geolocation/coordinates", """
-    Coordinates = (function(long, lat, accuracy) {
-        this.longitude = long
-        this.latitude = lat
-        this.accuracy = accuracy
-    });
-""")
-
 Coordinates = lambda runtime, *args: v8.JSObject.create(runtime.context.locals.Coordinates, args)
+
+
+def prepare_geolocation(runtime):
+    runtime.context.eval(position_js)
 
 
 class Geolocation(object):

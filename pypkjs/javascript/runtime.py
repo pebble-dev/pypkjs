@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 __author__ = 'katharine'
 
-import pypkjs.PyV8 as v8
+import STPyV8 as v8
 import gevent
 import gevent.pool
 import gevent.queue
@@ -13,7 +13,7 @@ from .exceptions import JSRuntimeException
 
 logger = logging.getLogger('pypkjs.javascript.pebble')
 
-make_proxy_extension = v8.JSExtension("runtime/internal/proxy", """
+proxy_js = """
     function _make_proxies(proxy, origin, names) {
         names.forEach(function(name) {
             proxy[name] = eval("(function " + name + "() { return origin[name].apply(origin, arguments); })");
@@ -35,7 +35,7 @@ make_proxy_extension = v8.JSExtension("runtime/internal/proxy", """
         });
         return proxy;
     }
-""")
+"""
 
 
 class JSRuntime(object):
@@ -52,9 +52,10 @@ class JSRuntime(object):
 
     def setup(self):
         self.pjs = PebbleKitJS(self, self.qemu, persist=self.persist_dir)
-        self.context = v8.JSContext(extensions=self.pjs.get_extension_names())
+        self.context = v8.JSContext()
         with self.context:
             # Do some setup
+            self.context.eval(proxy_js)
             self.context.eval("this.toString = function() { return '[object Window]'; }")
             self.context.eval("window = this;")
             self.pjs.do_post_setup()
